@@ -176,7 +176,7 @@ You will find the figures in the following directory.
 ```
 
 # Citations
-## CityTransformer
+## Deep Learning
 ```bibtex
 @article{Asahi2022,
     title = {{CityTransformer: A Transformer based model for contaminant dispersion prediction in
@@ -192,7 +192,7 @@ method; Urban plume dispersion}
 }
 ```
 
-## Physical models.
+## Physics
 ```bibtex
 @article{OnoderaBLM2021,
     title = {{Real-time tracer dispersion simulation in Oklahoma City using locally-mesh refined lattice Boltzmann method}},
