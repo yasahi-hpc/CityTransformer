@@ -94,6 +94,11 @@ class _BaseTrainer:
         self.epoch_start = 0
         self.run_number = 0
 
+        if self.super_precision:
+            raise ValueError('Please do not add --super_precision in your command line arguments. \
+                              This functionality is suppressed which needs the multi-digits dataset. \
+                              We do not publish multi-digits dataset due to the limitiatio of storage.')
+
     def initialize(self, *args, **kwargs):
         if self.inference_mode:
             self.initialize_inference(*args, **kwargs)

@@ -181,7 +181,7 @@ class TransformerBlock(nn.Module):
                 raise TypeError('Keyword argument not understood: ', kwarg)
 
         d_model = kwargs.get('d_model', 256)
-        d_hidden = kwargs.get('d_hiddn', 128)
+        d_hidden = kwargs.get('d_hidden', 128)
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
         dropout = kwargs.get('dropout', 0)
@@ -350,7 +350,7 @@ class FrontEnd(nn.Module):
                           'activation',
                           'n_layers_cnn',
                           'n_resnet_blocks',
-                          'n_layers_mariage',
+                          'n_layers_merge',
                           'n_layers_transformer',
                           'd_model',
                           'version',
@@ -380,7 +380,7 @@ class FrontEnd(nn.Module):
         n_layers_cnn = kwargs.get('n_layers_cnn', 6)
         #n_resnet_blocks = kwargs.get('n_resnet_blocks', 9)
         n_layers_transformer = kwargs.get('n_layers_transformer', 6)
-        n_layers_mariage = kwargs.get('n_layers_mariage', 2)
+        n_layers_merge = kwargs.get('n_layers_merge', 2)
         d_model = kwargs.get('d_model', 256)
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
@@ -456,7 +456,7 @@ class FrontEnd(nn.Module):
             hidden_imgs_out = in_channels
             self.merge = MergeBlock(in_channels=in_channels, h=h, w=w, hidden_imgs_out=hidden_imgs_out,
                                     hidden_series_in=hidden_series_in, hidden_series_out=hidden_series_out,
-                                    n_layers=n_layers_mariage)
+                                    n_layers=n_layers_merge)
 
     def forward(self, imgs):
         encoded_imgs = self.imgs_downsample(imgs)
@@ -476,7 +476,7 @@ class ConnectionLayers(nn.Module):
                           'activation',
                           'n_layers_cnn',
                           'n_resnet_blocks',
-                          'n_layers_mariage',
+                          'n_layers_merge',
                           'n_layers_transformer',
                           'd_model',
                           'version',
@@ -505,7 +505,7 @@ class ConnectionLayers(nn.Module):
         n_layers_cnn = kwargs.get('n_layers_cnn', 6)
         n_resnet_blocks = kwargs.get('n_resnet_blocks', 9)
         n_layers_transformer = kwargs.get('n_layers_transformer', 6)
-        n_layers_mariage = kwargs.get('n_layers_mariage', 2)
+        n_layers_merge = kwargs.get('n_layers_merge', 2)
         d_model = kwargs.get('d_model', 256)
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
@@ -586,7 +586,7 @@ class ConnectionLayers(nn.Module):
         hidden_imgs_out = in_channels
         self.merge = MergeBlock(in_channels=in_channels, h=h, w=w, hidden_imgs_out=hidden_imgs_out,
                                 hidden_series_in=hidden_series_in, hidden_series_out=hidden_series_out,
-                                n_layers=n_layers_mariage)
+                                n_layers=n_layers_merge)
 
     def forward(self, imgs, series):
         encoded_imgs = self.imgs_encoder(imgs)
@@ -608,7 +608,7 @@ class BackEnd(nn.Module):
                           'padding_mode',
                           'activation',
                           'n_layers',
-                          'n_layers_mariage',
+                          'n_layers_merge',
                           'n_layers_transformer',
                           'd_model',
                           'version',
@@ -636,7 +636,7 @@ class BackEnd(nn.Module):
         activation = kwargs.get('activation', 'ReLU')
         self.n_layers = kwargs.get('n_layers', 6)
         n_layers_transformer = kwargs.get('n_layers_transformer', 6)
-        n_layers_mariage = kwargs.get('n_layers_mariage', 2)
+        n_layers_merge = kwargs.get('n_layers_merge', 2)
         d_model = kwargs.get('d_model', 256)
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
@@ -676,7 +676,7 @@ class CityTransformer(nn.Module):
                           'n_layers',
                           'n_resnet_blocks_low',
                           'n_resnet_blocks_high',
-                          'n_layers_mariage',
+                          'n_layers_merge',
                           'n_layers_cnn',
                           'n_layers_transformer',
                           'n_precision_enhancers',
@@ -747,7 +747,7 @@ class CityTransformer(nn.Module):
                 in_channels_ = mult*2 if final_layer else mult*4
                 setattr(self, f'unet_decoder{i}', UNetDecoderBlock(in_channels_, mult, kernel_size=3, stride=2, dim=dim))
 
-            # Series encoder block and mariage block
+            # Series encoder block and merge block
             kwargs_low_precision['n_layers_cnn'] = self.n_layers - 1
             kwargs_low_precision['UNet'] = True
             self.front_end = FrontEnd(**kwargs_low_precision)
