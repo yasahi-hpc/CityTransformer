@@ -1,3 +1,4 @@
+import abc
 import torch
 import torch.multiprocessing as mp
 import numpy as np
@@ -10,15 +11,16 @@ from collections import defaultdict
 from .utils import Timer, MeasureMemory
 from .city_dataset import CityDataset
 from .city_transformer import CityTransformer
-from ._img_saver import _CityTransformerImageSaver, _CityTransformerInverseImageSaver, save_loss
-from ._data_saver import _CityTransformerDataSaver, _CityTransformerInverseDataSaver
+from .img_saver import CityTransformerImageSaver, CityTransformerInverseImageSaver, save_loss
+from .data_saver import CityTransformerDataSaver, CityTransformerInverseDataSaver
 
-class _BaseTrainer:
+class _BaseTrainer(abc.ABC):
     """
     Base classs for training
     """
 
     def __init__(self, *args, **kwargs):
+        super().__init__()
         self.losses = defaultdict(list)
         self.elapsed_times = defaultdict(list)
         self.memory_consumption = {}
@@ -44,6 +46,8 @@ class _BaseTrainer:
                           'n_digits',
                           'n_precision_enhancers',
                           'n_freq_checkpoint',
+                          'n_stations',
+                          'nz_scan',
                           'super_precision',
                           'use_adasum',
                           'gradient_predivide_factor',
@@ -66,6 +70,8 @@ class _BaseTrainer:
         self.n_epochs = kwargs.get('n_epochs', 1)
         self.n_freq_checkpoint = kwargs.get('n_freq_checkpoint', 10)
         self.n_digits = kwargs.get('n_digits', 8)
+        self.n_stations = kwargs.get('n_stations', 14)
+        self.nz_scan = kwargs.get('nz_scan', 100)
         self.seed   = kwargs.get('seed', 0)
         self.batch_size = kwargs.get('batch_size', 16)
         self.version = kwargs.get('version', 0)
@@ -229,20 +235,20 @@ class _BaseTrainer:
         with torch.no_grad():
             self._infer(data_loader=self.val_loader, epoch=epoch, mode='val')
             self._infer(data_loader=self.test_loader, epoch=epoch, mode='test')
-            
+
+    @abc.abstractmethod
     def _train(self, data_loader, epoch):
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def _test(self, data_loader, epoch, mode):
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def _infer(self, data_loader, epoch, mode):
         raise NotImplementedError()
 
     def finalize(self, *args, **kwargs):
-        self._finalize(*args, **kwargs)
-
-    def _finalize(self, *args, **kwargs):
         seconds = kwargs.get('seconds')
 
         log_filename = pathlib.Path(self.out_dir) / f'log_{self.mode_name}_{self.run_number:03}.txt'
@@ -313,6 +319,7 @@ class _BaseTrainer:
             attrs['loss_type'] = self.loss_type
             attrs['elapsed_time'] = elapsed_seconds
             attrs['run_number'] = self.run_number
+            attrs['nz_scan'] = self.resolution_dict['Nz']
 
         data_vars = {}
         data_vars['train_losses'] = (['epochs'], self.losses['train'])
@@ -377,16 +384,20 @@ class _BaseTrainer:
         dataset_dict = {
                         'device': self.device,
                         'version': self.version,
-                        'super_precision': self.super_precision,
-                        'n_digits': self.n_digits,
-                        'n_precision_enhancers': self.n_precision_enhancers,
                         'inference_mode': self.inference_mode,
+                        'nb_source_amps': self.nb_source_amps,
+                        'randomize_source_amps': self.randomize_source_amps,
+                        'n_stations': self.n_stations,
+                        'nz': self.nz_scan,
                        }
 
+        # Start idx defines the range of random numbers to be used
+        idx_val, idx_test = 350000, 400000
         if self.inference_mode:
             # Do not use train dataset in inference
-            val_dataset   = CityDataset(path=val_dir, **dataset_dict)
-            test_dataset  = CityDataset(path=test_dir, **dataset_dict)
+            dataset_dict['nb_source_amps'] = 1
+            val_dataset   = CityDataset(path=val_dir, **dataset_dict, start_idx=idx_val)
+            test_dataset  = CityDataset(path=test_dir, **dataset_dict, start_idx=idx_test)
 
             train_loader = None
             val_loader   = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
@@ -394,8 +405,9 @@ class _BaseTrainer:
 
         else:
             train_dataset = CityDataset(path=train_dir, **dataset_dict)
-            val_dataset   = CityDataset(path=val_dir, **dataset_dict)
-            test_dataset  = CityDataset(path=test_dir, **dataset_dict)
+            dataset_dict['nb_source_amps'] = 1
+            val_dataset   = CityDataset(path=val_dir, **dataset_dict, start_idx=idx_val)
+            test_dataset  = CityDataset(path=test_dir, **dataset_dict, start_idx=idx_test)
 
             # Horovod: use Distributed Sampler to partition the training data
             self.train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=self.size, rank=self.rank)
@@ -421,7 +433,7 @@ class _BaseTrainer:
         self.imgs_max, self.imgs_min = norm_dict['imgs_max'], norm_dict['imgs_min']
         self.concentrations_max, self.concentrations_min = norm_dict['concentrations_max'], norm_dict['concentrations_min']
         self.series_max, self.series_min = norm_dict['series_max'], norm_dict['series_min']
-        self.release_sdf_max, self.release_sdf_min = norm_dict['release_sdf_max'], norm_dict['release_sdf_min']
+        self.distance_and_source_max, self.distance_and_source_min = norm_dict['distance_and_source_max'], norm_dict['distance_and_source_min']
 
         return train_loader, val_loader, test_loader 
 
@@ -442,8 +454,10 @@ class _BaseTrainer:
         self.load_model = self.__find_checkpoint(checkpoint_idx)
         if self.load_model:
             ds = xr.open_dataset(self.checkpoint, engine='netcdf4')
-            if ds.attrs['model_name'] != self.model_name:
-                raise IOError('Error in model load. Loading different type of model')
+            if (ds.attrs['model_name'] != self.model_name) or (ds.attrs['version'] != self.version):
+                my_model = f'{self.model_name}.v{self.version}'
+                saved_model = f"{ds.attrs['model_name']}.v{ds.attrs['version']}"
+                raise IOError(f'Error in model load. Loading different type or version of model: my model is {my_model}, saved model is {saved_model}')
 
             last_run_number = ds.attrs['run_number']
             last_state_file = ds.attrs['last_state_file']
@@ -456,19 +470,19 @@ class _BaseTrainer:
 
     def _get_image_saver(self):
         if self.model_name == 'CityTransformer':
-            image_saver = _CityTransformerImageSaver(out_dir=self.sub_fig_dir, 
-                                                     clip=self.min_value,
-                                                     vmin=self.min_value,
-                                                     vmax=1.0,
-                                                     cmap='hot',
-                                                     super_precision=self.super_precision,
-                                                     n_precision_enhancers=self.n_precision_enhancers)
+            image_saver = CityTransformerImageSaver(out_dir=self.sub_fig_dir, 
+                                                    clip=self.min_value,
+                                                    vmin=self.min_value,
+                                                    vmax=1.0,
+                                                    cmap='hot',
+                                                    super_precision=self.super_precision,
+                                                    n_precision_enhancers=self.n_precision_enhancers)
 
         elif self.model_name == 'CityTransformerInverse':
-            image_saver = _CityTransformerInverseImageSaver(out_dir=self.sub_fig_dir,
-                                                            vmin=0,
-                                                            vmax=2000,
-                                                            cmap='seismic')
+            image_saver = CityTransformerInverseImageSaver(out_dir=self.sub_fig_dir,
+                                                           vmin=0,
+                                                           vmax=2000,
+                                                           cmap='seismic')
 
         else:
             raise ValueError('model should be either CityTransformer or CityTransformerInverse')
@@ -477,22 +491,26 @@ class _BaseTrainer:
 
     def _get_data_saver(self):
         if self.model_name == 'CityTransformer':
-            data_saver = _CityTransformerDataSaver(out_dir=self.inference_dir,
-                                                   clip=self.min_value,
-                                                   version=self.version,
-                                                   station_positions=self.station_positions,
-                                                   norm_dict=self.norm_dict,
-                                                   num_stations=self.resolution_dict['num_stations']
-                                                   )
+            data_saver = CityTransformerDataSaver(out_dir=self.inference_dir,
+                                                  clip=self.min_value,
+                                                  version=self.version,
+                                                  modes=['val', 'test'],
+                                                  station_positions=self.station_positions,
+                                                  norm_dict=self.norm_dict,
+                                                  n_stations=self.resolution_dict['n_stations'],
+                                                  nz = self.resolution_dict['Nz']
+                                                  )
 
         elif self.model_name == 'CityTransformerInverse':
-            data_saver = _CityTransformerInverseDataSaver(out_dir=self.inference_dir,
-                                                          clip=self.min_value,
-                                                          version=self.version,
-                                                          station_positions=self.station_positions,
-                                                          norm_dict=self.norm_dict,
-                                                          num_stations=self.resolution_dict['num_stations']
-                                                         )
+            data_saver = CityTransformerInverseDataSaver(out_dir=self.inference_dir,
+                                                         clip=self.min_value,
+                                                         version=self.version,
+                                                         modes=['val', 'test'],
+                                                         station_positions=self.station_positions,
+                                                         norm_dict=self.norm_dict,
+                                                         n_stations=self.resolution_dict['n_stations'],
+                                                         nz = self.resolution_dict['Nz']
+                                                        )
 
         else:
             raise ValueError('model should be either CityTransformer or CityTransformerInverse')

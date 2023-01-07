@@ -1,43 +1,19 @@
 """
-Version 0: Resnet + Transformer (attention on time)
+Version 0: Resnet + Transformer (attention on time), using the ground plume concentration only
 Input:
     imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, t, z) time series data of measurements
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
+    series: (b, t, s*c) time series data of measurement, s = stations, c = (z, z, 1, 1)
 
-Version 1: Resnet + Transformer (attention on z)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, z) time averaged data of measurements
 Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
+    imgs: (b, 2, h, w) concentration + binary-map
 
-Version 2: Resnet + Transformer (attention on time, at z = 0)
+Version 1: Resnet + MLP, using the ground plume concentration only
 Input:
     imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, t, 1) time series data of measurements
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
+    series: (b, 1, s*c) time averaged data of measurement, s = stations, c = (z, z, 1, 1)
 
-Version 3: Resnet + MLP (on z)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, z) time averaged data of measurements
 Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/  sp): (b, p, h, w) concentration (multiple-levels) + zero_map
-
-Version 4: Resnet + MLP (on z==0)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, 1) time averaged data of measurements at z = 0
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/  sp): (b, p, h, w) concentration (multiple-levels) + zero_map
+    imgs: (b, 2, h, w) concentration + binary-map
 """
 
 import torch
@@ -147,7 +123,7 @@ class ResnetBlock(nn.Module):
         return out
 
 class MLPBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, activation='ReLU'):
+    def __init__(self, in_channels, out_channels, activation='ReLU', skip_connection=False):
         super().__init__()
         layers = []
 
@@ -155,9 +131,16 @@ class MLPBlock(nn.Module):
         layers += [activation_layer(activation=activation)]
 
         self.model = nn.Sequential(*layers)
+        self.skip_connection = skip_connection 
+
+        if in_channels != out_channels:
+            self.skip_connection = False
 
     def forward(self, x):
-        return self.model(x)
+        if self.skip_connection:
+            return x + self.model(x)
+        else:
+            return self.model(x)
 
 class TransformerBlock(nn.Module):
     def __init__(self, **kwargs):
@@ -170,10 +153,8 @@ class TransformerBlock(nn.Module):
                           'dim_feedforward',
                           'dropout',
                           'num_layers',
-                          'num_stations',
+                          'num_channels',
                           'Nt',
-                          'Nz',
-                          'attention_axis',
                          }
 
         for kwarg in kwargs:
@@ -185,35 +166,21 @@ class TransformerBlock(nn.Module):
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
         dropout = kwargs.get('dropout', 0)
-        num_layers = kwargs.get('num_layers', 6)
-        num_stations = kwargs.get('num_stations', 12)
         Nt = kwargs.get('Nt', 16)
-        Nz = kwargs.get('Nz', 16)
-        attention_axis = kwargs.get('attention_axis', 'time')
-
-        if attention_axis == 'time':
-            patch_dim = num_stations * Nz
-            # Define embedding
-            # Transpose and apply linear
-            # 1. (b s t z) -> (b t (s z))
-            # 2. (b t (s z)) -> (b t d)
-            self.series_embedding = nn.Sequential(
-                Rearrange('b s t z -> b t (s z)'),
-                nn.Linear(patch_dim, d_model), 
-            )
-            self.pos_embedding = nn.Parameter( torch.randn(1, Nt, d_model) )
-
-        else:
-            patch_dim = num_stations * Nt
-            # Define embedding
-            # Transpose and apply linear
-            # 1. (b s t z) -> (b z (s t))
-            # 2. (b z (s t)) -> (b z d)
-            self.series_embedding = nn.Sequential(
-                Rearrange('b s t z -> b z (s t)'),
-                nn.Linear(patch_dim, d_model), 
-            )
-            self.pos_embedding = nn.Parameter( torch.randn(1, Nz, d_model) )
+        num_layers = kwargs.get('num_layers', 6)
+        num_channels = kwargs.get('num_channels')
+        if num_channels is None:
+            raise ValueError('Argument num_channels must be given for TransformerBlock')
+        
+        # Define embedding
+        # Transpose and apply linear layer
+        # 1. (b t s c) -> (b t (s c))
+        # 2. (b t (s c)) -> (b t d)
+        self.series_embedding = nn.Sequential(
+            Rearrange('b t s c -> b t (s c)'),
+            nn.Linear(num_channels, d_model),
+        )
+        self.pos_embedding = nn.Parameter( torch.randn(1, Nt, d_model) )
 
         self.dropout = nn.Dropout(dropout)
         self.scale = math.sqrt(d_model)
@@ -231,11 +198,10 @@ class TransformerBlock(nn.Module):
 
     def forward(self, series):
         """
-        series (b, s, t, z)
+        series (b, t, s, c)
         """
 
         # Embedding data
-        #print('series.shape', series.shape)
         out = self.series_embedding(series) * self.scale
         out += self.pos_embedding
         out = self.dropout(out)
@@ -248,9 +214,6 @@ class TransformerBlock(nn.Module):
         return out
 
 class MergeBlock(nn.Module):
-    """
-    [TO DO] Use g-MLP layers
-    """
     def __init__(self, **kwargs):
         super().__init__()
         allowed_kwargs = {
@@ -308,7 +271,6 @@ class MLPEncoder(nn.Module):
                           'in_channels',
                           'hidden_dims',
                           'out_channels',
-                          'Nz',
                           'activation',
                          }
 
@@ -322,53 +284,26 @@ class MLPEncoder(nn.Module):
         hidden_dims = kwargs.get('hidden_dims', 128)
         out_channels = kwargs.get('out_channels', 128)
         activation = kwargs.get('activation', 'ReLU')
-        Nz = kwargs.get('Nz', 16)
 
         layers = []
-        layers += [Rearrange('b c t z -> b (c t z)')]
+        layers += [Rearrange('b t s c -> b (t s c)')]
         layers += [MLPBlock(in_channels, hidden_dims, activation)]
         for _ in range(num_layers):
-            layers += [MLPBlock(hidden_dims, hidden_dims, activation)]
+            layers += [MLPBlock(hidden_dims, hidden_dims, activation, True)] # With skip connection
         layers += [MLPBlock(hidden_dims, out_channels, activation)]
         layers += [Rearrange('b (c d) -> b c d', c=1)]
 
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
+        """
+        (b, t, s, c)
+        """
         return self.model(x)
 
 class FrontEnd(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        allowed_kwargs = {
-                          'in_channels',
-                          'out_channels',
-                          'hidden_dim',
-                          'hidden_dim_transformer',
-                          'dim',
-                          'padding_mode',
-                          'activation',
-                          'n_layers_cnn',
-                          'n_resnet_blocks',
-                          'n_layers_merge',
-                          'n_layers_transformer',
-                          'd_model',
-                          'version',
-                          'nhead',
-                          'dim_feedforward',
-                          'dropout',
-                          'num_stations',
-                          'num_series_channels',
-                          'Nt',
-                          'Nx',
-                          'Ny',
-                          'Nz',
-                          'UNet',
-                         }
-         
-        for kwarg in kwargs:
-            if kwarg not in allowed_kwargs:
-                raise TypeError('Keyword argument not understood: ', kwarg)
 
         in_channels = kwargs.get('in_channels', 2)
         out_channels = kwargs.get('out_channels', 1)
@@ -385,7 +320,7 @@ class FrontEnd(nn.Module):
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
         dropout = kwargs.get('dropout', 0)
-        num_stations = kwargs.get('num_stations', 14)
+        n_stations = kwargs.get('n_stations', 14)
         Nt = kwargs.get('Nt', 16)
         Nx = kwargs.get('Nx', 256)
         Ny = kwargs.get('Ny', 256)
@@ -406,45 +341,21 @@ class FrontEnd(nn.Module):
         self.imgs_downsample = nn.Sequential(*layers)
 
         # These sublayers are created for UNet model only
+        num_channels = n_stations * (Nz * 2 + 2)
         if UNet:
             # Series encoder block
+
             if self.version == 0:
                 # Attention on time
-                # Input: (b, c, t, z)
-                pass
-
-            elif self.version == 1:
-                # Attention on z
-                # Input: (b, c, 1, z)
-                Nt = 1
-
-            elif self.version == 2:
-                # Attention on time
-                # Input: (b, c, t, 1)
-                Nz = 1
-            elif self.version == 3:
-                # Input: (b, c, 1, z)
-                Nt = 1
-            elif self.version == 4:
-                # Input: (b, c, 1, 1)
-                Nt, Nz = 1, 1
-            if self.version == 0:
+                # Input: (b, t, c)
                 self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                       dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='time')
+                                                       dropout=dropout, num_layers=n_layers_transformer, Nt=Nt, num_channels=num_channels)
                 hidden_series_in = Nt * hidden_dim_transformer
                 hidden_series_out = Nt * hidden_dim_transformer
             elif self.version == 1:
-                self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                       dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='z')
-                hidden_series_in = Nz * hidden_dim_transformer
-                hidden_series_out = Nz * hidden_dim_transformer
-            elif self.version == 2:
-                self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                       dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='time')
-                hidden_series_in = Nt * hidden_dim_transformer
-                hidden_series_out = Nt * hidden_dim_transformer
-            elif self.version in [3, 4]:
-                self.series_encoder = MLPEncoder(in_channels=Nz*num_stations, hidden_dims=hidden_dim_transformer, out_channels=hidden_dim_transformer, Nz=Nz)
+                # Input: (b, 1, c)
+                Nt = 1
+                self.series_encoder = MLPEncoder(in_channels=num_channels, hidden_dims=hidden_dim_transformer, out_channels=hidden_dim_transformer)
                 hidden_series_in = hidden_dim_transformer
                 hidden_series_out = hidden_dim_transformer
 
@@ -466,34 +377,6 @@ class FrontEnd(nn.Module):
 class ConnectionLayers(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        allowed_kwargs = {
-                          'in_channels',
-                          'out_channels',
-                          'hidden_dim',
-                          'hidden_dim_transformer',
-                          'dim',
-                          'padding_mode',
-                          'activation',
-                          'n_layers_cnn',
-                          'n_resnet_blocks',
-                          'n_layers_merge',
-                          'n_layers_transformer',
-                          'd_model',
-                          'version',
-                          'nhead',
-                          'dim_feedforward',
-                          'dropout',
-                          'num_stations',
-                          'num_series_channels',
-                          'Nt',
-                          'Nx',
-                          'Ny',
-                          'Nz',
-                         }
-         
-        for kwarg in kwargs:
-            if kwarg not in allowed_kwargs:
-                raise TypeError('Keyword argument not understood: ', kwarg)
 
         in_channels = kwargs.get('in_channels', 2)
         out_channels = kwargs.get('out_channels', 1)
@@ -510,7 +393,7 @@ class ConnectionLayers(nn.Module):
         nhead = kwargs.get('nhead', 8)
         dim_feedforward = kwargs.get('dim_feedforward', 64)
         dropout = kwargs.get('dropout', 0)
-        num_stations = kwargs.get('num_stations', 14)
+        n_stations = kwargs.get('n_stations', 14)
         Nt = kwargs.get('Nt', 16)
         Nx = kwargs.get('Nx', 256)
         Ny = kwargs.get('Ny', 256)
@@ -538,43 +421,19 @@ class ConnectionLayers(nn.Module):
         self.imgs_upsample = nn.Sequential(*layers)
 
         # Series encoder block
+        num_channels = n_stations * (Nz * 2 + 2)
         if self.version == 0:
             # Attention on time
-            # Input: (b, c, t, z)
-            pass
-
-        elif self.version == 1:
-            # Attention on z
-            # Input: (b, c, 1, z)
-            Nt = 1
-
-        elif self.version == 2:
-            # Attention on time
-            # Input: (b, c, t, 1)
-            Nz = 1
-        elif self.version == 3:
-            # Input: (b, c, 1, z)
-            Nt = 1
-        elif self.version == 4:
-            # Input: (b, c, 1, 1)
-            Nt, Nz = 1, 1
-        if self.version == 0:
+            # Input: (b, t, c)
             self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                   dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='time')
+                                                   dropout=dropout, num_layers=n_layers_transformer, Nt=Nt, num_channels=num_channels)
             hidden_series_in = Nt * hidden_dim_transformer
             hidden_series_out = Nt * hidden_dim_transformer
         elif self.version == 1:
-            self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                   dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='z')
-            hidden_series_in = Nz * hidden_dim_transformer
-            hidden_series_out = Nz * hidden_dim_transformer
-        elif self.version == 2:
-            self.series_encoder = TransformerBlock(d_model=d_model, d_hidden=hidden_dim_transformer, nhead=nhead, dim_feedforward=dim_feedforward,
-                                                   dropout=dropout, num_layers=n_layers_transformer, num_stations=num_stations, Nt=Nt, Nz=Nz, attention_axis='time')
-            hidden_series_in = Nt * hidden_dim_transformer
-            hidden_series_out = Nt * hidden_dim_transformer
-        elif self.version in [3, 4]:
-            self.series_encoder = MLPEncoder(in_channels=Nz*num_stations, hidden_dims=hidden_dim_transformer, out_channels=hidden_dim_transformer, Nz=Nz)
+            # Input: (b, 1, c)
+            Nt = 1
+
+            self.series_encoder = MLPEncoder(in_channels=num_channels, hidden_dims=hidden_dim_transformer, out_channels=hidden_dim_transformer)
             hidden_series_in = hidden_dim_transformer
             hidden_series_out = hidden_dim_transformer
 
@@ -599,57 +458,10 @@ class ConnectionLayers(nn.Module):
 class BackEnd(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        allowed_kwargs = {
-                          'in_channels',
-                          'out_channels',
-                          'hidden_dim',
-                          'hidden_dim_transformer',
-                          'dim',
-                          'padding_mode',
-                          'activation',
-                          'n_layers',
-                          'n_layers_merge',
-                          'n_layers_transformer',
-                          'd_model',
-                          'version',
-                          'nhead',
-                          'dim_feedforward',
-                          'dropout',
-                          'num_stations',
-                          'num_series_channels',
-                          'Nt',
-                          'Nx',
-                          'Ny',
-                          'Nz',
-                         }
-         
-        for kwarg in kwargs:
-            if kwarg not in allowed_kwargs:
-                raise TypeError('Keyword argument not understood: ', kwarg)
-
-        in_channels = kwargs.get('in_channels', 2)
         out_channels = kwargs.get('out_channels', 2) #map and prediction
         hidden_dim = kwargs.get('hidden_dim', 16)
-        hidden_dim_transformer = kwargs.get('hidden_dim_transformer', 128)
         dim = kwargs.get('dim', 2)
         padding_mode = kwargs.get('padding_mode', 'zeros')
-        activation = kwargs.get('activation', 'ReLU')
-        self.n_layers = kwargs.get('n_layers', 6)
-        n_layers_transformer = kwargs.get('n_layers_transformer', 6)
-        n_layers_merge = kwargs.get('n_layers_merge', 2)
-        d_model = kwargs.get('d_model', 256)
-        nhead = kwargs.get('nhead', 8)
-        dim_feedforward = kwargs.get('dim_feedforward', 64)
-        dropout = kwargs.get('dropout', 0)
-        num_stations = kwargs.get('num_stations', 14)
-        Nt = kwargs.get('Nt', 16)
-        Nx = kwargs.get('Nx', 256)
-        Ny = kwargs.get('Ny', 256)
-        Nz = kwargs.get('Nz', 16)
-        version = kwargs.get('version', 0)
-        
-        self.version = version
-
         layers = []
 
         ### 1x1 convolution to generate flows
@@ -685,7 +497,7 @@ class CityTransformer(nn.Module):
                           'nhead',
                           'dim_feedforward',
                           'dropout',
-                          'num_stations',
+                          'n_stations',
                           'num_series_channels',
                           'Nt',
                           'Nx',
@@ -709,27 +521,16 @@ class CityTransformer(nn.Module):
         dim = kwargs.get('dim', 2)
         padding_mode = kwargs.get('padding_mode', 'zeros')
         activation = kwargs.get('activation', 'ReLU')
-
         hidden_dim = kwargs.get('hidden_dim', 16)
         version = kwargs.get('version', 0)
-
-        n_precision_enhancers = kwargs.get('n_precision_enhancers', 1)
         n_resnet_blocks_high = kwargs.get('n_resnet_blocks_high', 2)
 
-        self.super_precision = kwargs.get('super_precision', False)
         self.version = version
         self.n_layers = kwargs.get('n_layers', 6)
-        self.n_precision_enhancers = n_precision_enhancers
         self.UNet = kwargs.get('UNet', False)
 
-        if self.UNet and self.super_precision:
-            self.UNet = False
-
-        if self.super_precision:
-            kwargs_low_precision['out_channels'] = 1
-
-        # Version 0 to 4 supported
-        assert self.version in [0,1,2,3,4]
+        # Version 0 to 1 supported
+        assert self.version in [0,1]
 
         ## Construct model
         if self.UNet:
@@ -766,51 +567,11 @@ class CityTransformer(nn.Module):
             self.upsample = ConnectionLayers(**kwargs_low_precision)
             self.final = BackEnd(**kwargs_low_precision)
 
-        # Precision enhancers
-        if self.super_precision:
-            for n in range(1, self.n_precision_enhancers+1):
-                ### Downsample
-                hidden_dim_tmp = hidden_dim
-                kwargs_high_precision = kwargs_low_precision.copy()
-                kwargs_high_precision['hidden_dim'] = hidden_dim_tmp
-                kwargs_high_precision['out_channels'] = 2 if n == self.n_precision_enhancers else 1
-
-                setattr(self, f'model_encode_{n}', ConvBlock(in_channels, hidden_dim, kernel_size=7, stride=1, dim=dim, padding_mode=padding_mode))
-                setattr(self, f'model_downsample_{n}', FrontEnd(**kwargs_high_precision))
-
-                ### Resnet blocks
-                setattr(self, f'model_upsample_{n}', ConnectionLayers(**kwargs_high_precision, n_resnet_blocks=n_resnet_blocks_high))
-
-                ### Back end
-                setattr(self, f'model_final_{n}', BackEnd(**kwargs_high_precision))
-
     def forward(self, imgs, series):
-        if self.super_precision:
-            return self._forward_super_precision(imgs, series)
+        if self.UNet:
+            return self._forward_UNet(imgs, series)
         else:
-            if self.UNet:
-                return self._forward_UNet(imgs, series)
-            else:
-                return self._forward(imgs, series)
-
-    def _forward_super_precision(self, imgs, series):
-        out_low = self.encode(imgs)
-        out_low = self.downsample(out_low)
-        out_low = self.upsample(out_low, series)
-
-        ### low precision to high precision
-        out = [self.final(out_low)]
-        for n in range(1, self.n_precision_enhancers+1):
-            model_encode     = getattr(self, f'model_encode_{n}')
-            model_downsample = getattr(self, f'model_downsample_{n}')
-            model_upsample   = getattr(self, f'model_upsample_{n}')
-            model_final      = getattr(self, f'model_final_{n}')
-
-            out_low = model_downsample(model_encode(imgs) + out_low)
-            out_low = model_upsample(out_low, series)
-            out += [model_final(out_low)]
-
-        return torch.cat(out, axis=1)
+            return self._forward(imgs, series)
 
     def _forward(self, imgs, series):
         out = self.encode(imgs)

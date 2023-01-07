@@ -50,7 +50,7 @@ def save_loss(loss_data_dir, img_dir, run_number, vmin=0, vmax=0.01):
 def to_numpy(var):
     return np.squeeze(var.numpy()) if var.device == 'cpu' else  np.squeeze(var.cpu().numpy())
 
-class _CityTransformerImageSaver(_BaseSaver):
+class CityTransformerImageSaver(_BaseSaver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -78,7 +78,7 @@ class _CityTransformerImageSaver(_BaseSaver):
         self.ymax = 1024
         self.extent = [-self.xmax, self.xmax, -self.ymax, self.ymax]
 
-    def _save(self, *args, **kwargs):
+    def save(self, *args, **kwargs):
         levelset = kwargs.get('levelset')
         release_points = kwargs.get('release_points')
         ref = kwargs.get('ref')
@@ -136,7 +136,7 @@ class _CityTransformerImageSaver(_BaseSaver):
         fig.savefig(fig_dir / filename)
         plt.close('all')
 
-class _CityTransformerInverseImageSaver(_BaseSaver):
+class CityTransformerInverseImageSaver(_BaseSaver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.vmin = kwargs.get('vmin', 0)
@@ -162,7 +162,7 @@ class _CityTransformerInverseImageSaver(_BaseSaver):
         self.alpha = 0.5
         self.extent = [-self.xmax, self.xmax, -self.ymax, self.ymax]
 
-    def _save(self, *args, **kwargs):
+    def save(self, *args, **kwargs):
         levelset = kwargs.get('levelset')
         release_points = kwargs.get('release_points')
         ref = kwargs.get('ref')
@@ -173,6 +173,9 @@ class _CityTransformerInverseImageSaver(_BaseSaver):
 
         data_dict = {'ref': ref,
                      'pred': pred,}
+
+        print('ref.shape', ref.shape)
+        print('pred.shape', pred.shape)
          
         for name, data in data_dict.items():
             self.__save_images(levelset, release_points, data, mode, n_cols, name, epoch)

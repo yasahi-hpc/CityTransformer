@@ -7,6 +7,8 @@ class CityTransformerTrainer(_BaseTrainer):
         self.model_name = 'CityTransformer'
         self.in_channels = 2
         self.out_channels = 2
+        self.nb_source_amps = 1
+        self.randomize_source_amps = False
 
     def _train(self, data_loader, epoch):
         mode = 'train'
@@ -117,7 +119,7 @@ class CityTransformerTrainer(_BaseTrainer):
     def _infer(self, data_loader, epoch, mode):
         self.model.eval()
 
-        for i, (indices, imgs, concentrations, series, release_points, flow_directions) in enumerate(data_loader):
+        for i, (indices, imgs, concentrations, series, release_points, flows_and_sources) in enumerate(data_loader):
             imgs, concentrations, series = imgs.to(self.device), concentrations.to(self.device), series.to(self.device)
 
             # Keep Object shape
@@ -149,7 +151,7 @@ class CityTransformerTrainer(_BaseTrainer):
             self.data_saver.save(levelset=levelset_cpu,
                                  sdf_release=sdf_release,
                                  release_points=release_points,
-                                 flow_directions=flow_directions,
+                                 flows_and_sources=flows_and_sources,
                                  ref=(ref_plume, ref_zeros_map),
                                  pred=(pred_plume, pred_zeros_map),
                                  indices=indices,
