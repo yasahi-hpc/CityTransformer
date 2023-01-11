@@ -182,21 +182,17 @@ You will find the figures and postscripted data files in the following directory
 ## Deep Learning (This work)
 ```bibtex
 @Article{Asahi2023,
-author={Asahi, Yuuichi
-and Onodera, Naoyuki
-and Hasegawa, Yuta
-and Shimokawabe, Takashi
-and Shiba, Hayato
-and Idomura, Yasuhiro},
-title={CityTransformer: A Transformer-Based Model for Contaminant Dispersion Prediction in a Realistic Urban Area},
-journal={Boundary-Layer Meteorology},
-year={2023},
-month={Jan},
-day={04},
-abstract={We develop a Transformer-based deep learning model to predict the plume concentrations in the urban area in statistically stationary flow conditions under a stationary and homogeneous forcing. Our model has two distinct input layers: Transformer layers for sequential data and convolutional layers in convolutional neural networks for image-like data. Our model can predict the plume concentration from realistically available data such as the time series monitoring data at a few observation stations, and the building shapes and the source location. It is shown that the model can give reasonably accurate prediction in less than a second. It is also shown that exactly the same model can be applied to predict the source location and emission rate, which also gives reasonable prediction accuracy.},
-issn={1573-1472},
-doi={10.1007/s10546-022-00777-8},
-url={https://doi.org/10.1007/s10546-022-00777-8}
+    title={CityTransformer: A Transformer-Based Model for Contaminant Dispersion Prediction in a Realistic Urban Area},
+    year={2023},
+    journal={Boundary-Layer Meteorology},
+    author={Asahi, Yuuichi and Onodera, Naoyuki and Hasegawa, Yuta and Shimokawabe, Takashi and Shiba, Hayato and Idomura, Yasuhiro},
+    publisher={Springer Netherlands},
+    month={Jan},
+    day={04},
+    issn={1573-1472},
+    doi={10.1007/s10546-022-00777-8},
+    url={https://doi.org/10.1007/s10546-022-00777-8},
+    keywords={Deep learning, Graphics-processing-unit-based computing, Lattice Boltzmann method, Urban plume dispersion}
 }
 ```
 
