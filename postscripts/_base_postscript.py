@@ -1,3 +1,4 @@
+import abc
 import pathlib
 import xarray as xr
 import matplotlib as mpl
@@ -5,11 +6,12 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.style
 
-class _BasePostscripts:
+class _BasePostscripts(abc.ABC):
     """
     Base class for postscript
     """
     def __init__(self, *args, **kwargs):
+        super().__init__()
         self.out_dir = kwargs.get('out_dir', './')
         self.checkpoint_idx = kwargs.get('checkpoint_idx', -1)
 
@@ -27,9 +29,6 @@ class _BasePostscripts:
         self._visualize(self.epoch)
 
     def finalize(self, *args, **kwargs):
-        self._finalize(*args, **kwargs)
-
-    def _finalize(self, *args, **kwargs):
         seconds = kwargs.get('seconds')
 
         log_filename = pathlib.Path(self.out_dir) / f'log_postscript.txt'
@@ -39,6 +38,10 @@ class _BasePostscripts:
             print(message, file=f)
             ds = xr.open_dataset(self.checkpoint, engine='netcdf4')
             print(ds, file=f)
+
+    @abc.abstractmethod
+    def _visualize(self, epoch):
+        raise NotImplementedError()
 
     def __prepare_dirs(self):
         out_dir = pathlib.Path(self.out_dir)
@@ -83,18 +86,12 @@ class _BasePostscripts:
             raise IOError('Error in model load. Loading different type of model')
 
         version = ds.attrs['version']
-        if version in [0, 1, 2]:
-            self.arch_name = 'Transformer'
-        else:
-            self.arch_name = 'MLP'
+        self.arch_name = 'Transformer' if version == 0 else 'MLP'
 
         self.epoch = int(ds.attrs['epoch_end'])
 
         self.nb_shots_dict = {'val': ds.attrs['nb_val'],
                               'test': ds.attrs['nb_test'],}
-
-    def _visualize(self, epoch):
-        raise NotImplementedError()
 
     def _visualize_loss(self, vmin=0, vmax=0.01):
         mpl.style.use('classic')

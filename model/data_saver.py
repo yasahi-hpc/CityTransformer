@@ -52,6 +52,7 @@ class CityTransformerDataSaver(_BaseSaver):
             coords_list = ['y', 'x']
             data_vars = {}
 
+            data_vars['levelset']       = (coords_list, np.squeeze(levelset[i]))
             data_vars['sdf_release']    = (coords_list, np.squeeze(sdf_release[i]))
             data_vars['ref_plume']      = (coords_list, np.squeeze(ref_plume[i]))
             data_vars['ref_zeros_map']  = (coords_list, np.squeeze(ref_zeros_map[i]))
@@ -143,12 +144,12 @@ class CityTransformerInverseDataSaver(_BaseSaver):
             coords_list = ['y', 'x']
             data_vars = {}
 
-            data_vars['levelset'] = (coords_list, np.squeeze(levelset[i]))
-            data_vars['ref_release'] = (coords_list, np.squeeze(ref_release[i]))
-            data_vars['ref_source_amplitude'] = (coords_list, np.squeeze(ref_amplitude[i]))
-            data_vars['pred_release'] = (coords_list, np.squeeze(pred_release[i]))
+            data_vars['levelset']              = (coords_list, np.squeeze(levelset[i]))
+            data_vars['ref_release']           = (coords_list, np.squeeze(ref_release[i]))
+            data_vars['ref_source_amplitude']  = (coords_list, np.squeeze(ref_amplitude[i]))
+            data_vars['pred_release']          = (coords_list, np.squeeze(pred_release[i]))
             data_vars['pred_source_amplitude'] = (coords_list, np.squeeze(pred_amplitude[i]))
-            data_vars['station_positions'] = (['stations', 'positions'], self.station_positions)
+            data_vars['station_positions']     = (['stations', 'positions'], self.station_positions)
 
             series_tmp = series[i]
             coords = {}

@@ -6,8 +6,8 @@ Data Manupulation
 
 Save figures
 1. Loss curve
-2. plume dispersion and errors
-3. metrics
+2. plume dispersion and errors (Fig. 9)
+3. metrics (Fig. 10)
 """
 
 import pathlib
@@ -168,6 +168,13 @@ class CityTransformerPostscripts(_BasePostscripts):
         self.__visualize_metrics(epoch)
 
     def __visualize_plume_dispersion(self, epoch):
+        """
+        Fig.9
+        Prediction of plume dispersion
+        First row: Concentrataions (ref) and (pred)
+        Second row: Regions coloured by the factor of x
+        """
+
         figsize = (8, 8)
         for mode in self.modes:
             nb_shots = self.nb_shots_dict[mode]
@@ -210,14 +217,21 @@ class CityTransformerPostscripts(_BasePostscripts):
 
                 cbar  = fig.colorbar(im,  ax=axes[0, :])
                 cbar2 = fig.colorbar(im2, ax=axes[1, :])
+                cbar.set_label('Concentration ' + r'$C$', size=self.fontsize*0.6)
 
                 cbar2.remove()
                 
-                figname = self.img_dir / 'contour' / f'log_{mode}{i:06}_epoch{epoch:04}.png'
+                figname = self.img_dir / 'contour' / f'concentration_{mode}{i:06}_epoch{epoch:04}.png'
                 plt.savefig(figname, bbox_inches='tight')
                 plt.close('all')
 
     def __visualize_metrics(self, epoch):
+        """
+        Fig.10
+        Histograms for Fac2, Fac5, FB, NAD, MG and VG
+        Histograms are normalized by the total counts
+        """
+
         figsize = (20, 12)
         plot_dict = {}
         # key: metric_name, value: xmin, xmax, ymin, ymax, label
