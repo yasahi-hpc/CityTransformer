@@ -1,15 +1,17 @@
 # CityTransformer
 
-_CityTransformer_ is designed to predict the plume concentrations in the urban area under uniform flow condition.
+[_CityTransformer_](https://doi.org/10.1007/s10546-022-00777-8) is designed to predict the plume concentrations in the urban area under uniform flow condition.
 It has two distinct input layers: Transformer layers for time series data and convolutional layers for image-like data.
 The inputs of the network are realistically available data such as the the building shapes and source locations, and time series monitoring data at a few observation stations. 
 
 This network can be used to predict the plume concentration and source location (inverse problem). In the inverse problem, the location where the distance function is closest to zero is considered as the predicted source location. Following table summarizes the choice of input and output data for each task. The examples of predictions are also shown. 
 
+For questions or comments, please find us in [AUTHORS](AUTHORS).
+
 | Task | Input data | Output data | Example | 
 | --- | --- | --- | --- |
-| Plume prediction | 1. Monitoring time series data <br> 2. Levelset of bulidings <br> 3. Distance function of sources | 1. Plume concentration <br> 2. Binary representation of plume | ![forward](docs/figs/forward.png) |
-| Source detection | 1. Monitoring time series data <br> 2. Levelset of bulidings | 1. Distance function of sources | ![inverse](docs/figs/inverse.png) |
+| Plume prediction | 1. Monitoring time series data <br> 2. Buliding height <br> 3. Distance function of sources | 1. Plume concentration <br> 2. Binary representation of plume | ![forward](docs/figs/forward.png) |
+| Source detection | 1. Monitoring time series data <br> 2. Buliding height | 1. Distance function of sources <br> 2. Source strength | ![inverse](docs/figs/inverse.png) |
 
 # Usage
 
@@ -22,36 +24,37 @@ This code relies on the following packages. As a deeplearing framework, we use [
 ```git clone https://github.com/yasahi-hpc/CityTransformer.git```
 
 ## Prepare dataset
-The urban plume dispersion dataset for CityTransformer has been computed by the [CityLBM](https://doi.org/10.1007/s10546-020-00594-x) code. The dataset can be downloaded from [Dataset (30000 training data, 2500 validation, and 2500 test data)](https://zenodo.org/record/6378050#.YjwDFy8Rqit). We simulate a 4km x 4km x 2.5km area of Oklahoma city under the uniform flow conditions. In each simulation, 25 tracer particles are released from random locations in the city center. We consider three distinct 1.5 hour long time windows for data augumentation. A single file `shot#.nc` includes the two dimensional levelset function (`levelset`), two dimensional distance function from a source location (`release_point`), time-averaged two dimensional plume concentration on the ground (`log_concentration_map`), and its binary representation (`concentration_binary_map`) as image-like data. In addition, each file includes the time-varying vertical profiles of <img src="https://render.githubusercontent.com/render/math?math={u}">, <img src="https://render.githubusercontent.com/render/math?math={v}">, <img src="https://render.githubusercontent.com/render/math?math={C}"> (`concentration`) and <img src="https://render.githubusercontent.com/render/math?math={\log_{10} C}"> (`log_concentration`) from 14 monitoring stations. The data is stored in the following format. In addition, we provide the precomputed normalization coefficients in a netcdf file, `stats.nc`.
+The urban plume dispersion dataset for CityTransformer has been computed by the [CityLBM](https://doi.org/10.1007/s10546-020-00594-x) code. The dataset can be downloaded from [Dataset (35000 training data, 2500 validation, and 2500 test data)](https://zenodo.org/record/6378050#.YjwDFy8Rqit). We simulate a 4km x 4km x 2.5km area of Oklahoma city under the uniform flow conditions. In each simulation, 25 tracer particles are released from random locations in the city center. We consider three distinct 1.5 hour long time windows for data augumentation. A single file `shot#.nc` includes the two dimensional levelset function (`levelset`), two dimensional distance function from a source location (`release_point`), time-averaged two dimensional plume concentration on the ground (`log_concentration_map`), and its binary representation (`concentration_binary_map`) as image-like data. In addition, each file includes the time-varying vertical profiles of flow velocities ![u](https://latex.codecogs.com/svg.latex?u) and ![v](https://latex.codecogs.com/svg.latex?v), and the ground level plume concentration ![C](https://latex.codecogs.com/svg.latex?C) (`concentration`) and ![logC](https://latex.codecogs.com/svg.latex?\log{C}) (`log_concentration`) from 14 monitoring stations. The data is stored in the following format. In addition, we provide the precomputed normalization coefficients in a netcdf file, `stats.nc`. For the inverse problem, we use the precomputed random numbers in `random_numbers.nc` to augment the source strength.
 ```
 <xarray.Dataset>
-Dimensions:                   (station: 14, time: 60, z: 100, y: 256, x: 256, positions: 3)
+Dimensions:                   (time: 60, station: 14, z: 100, y: 256, x: 256, positions: 3)
 Coordinates:
   * station                   (station) int32 0 1 2 3 4 5 6 7 8 9 10 11 12 13
-  * time                      (time) datetime64[ns] 2003-07-16T12:00:00 ... 2...
+  * time                      (time) datetime64[ns] 2003-07-16T09:00:00 ... 2...
   * x                         (x) float32 -1.024e+03 -1.016e+03 ... 1.024e+03
   * y                         (y) float32 -1.024e+03 -1.016e+03 ... 1.024e+03
   * z                         (z) float32 1.0 3.0 5.0 7.0 ... 195.0 197.0 199.0
   * positions                 (positions) int32 0 1 2
 Data variables:
-    u                         (station, time, z) float32 ...
-    v                         (station, time, z) float32 ...
-    concentration             (station, time, z) float32 ...
-    log_concentration         (station, time, z) float32 ...
+    u                         (time, station, z) float32 ...
+    v                         (time, station, z) float32 ...
     release_point             (y, x) float32 ...
     levelset                  (y, x) float32 ...
     concentration_binary_map  (y, x) float32 ...
     log_concentration_map     (y, x) float32 ...
     station_position          (station, positions) float64 ...
+    concentration             (time, station) float32 ...
+    log_concentration         (time, station) float32 ...
 Attributes:
-    v0:         6.5141395161477575
-    theta0:     5.826500544551968
+    v0:         8.160571261564549
+    theta0:     3.043304488246517
     clip:       1e-08
-    release_x:  128
-    release_y:  -61
+    release_x:  69
+    release_y:  207
 ```
 
-Once you download the dataset, you should create a dataset directory `<path_to_dataset_directory>`, wherein the training, valdiation and testdata are placed in the following manner.
+Firstly, you need to download the dataset files from into `<path_to_dataset_directory>`. Please make sure you have `train.tar.gz.aa-train.tar.gz.al`, `val.tar.gz`, and `test.tar.gz` under `<path_to_dataset_directory>`.
+Once you download the dataset, you should create a dataset directory `<path_to_dataset_directory>/dataset` by running `./prepare_dataset.sh`. Under the dataset dirctory `<path_to_dataset_directory>/dataset`, the training, valdiation and test data are placed in the following manner.
 
 ```
 ---/
@@ -74,22 +77,22 @@ Once you download the dataset, you should create a dataset directory `<path_to_d
 
 
 ## Training
-For training, it is recommended to use multiple Nvidia GPUs (12 GB memory or larger). 
-We have trained the moel on [Nvidia V100](https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf) GPUs. For the CNN architecture, we have prepared `Res-Net` and `U-Net` architectures. `Transformer` and `MLP` layers are available to encode time series data. The model can be set by the command line arguments. We used the following arguments for each task.
+For training, it is recommended to use multiple NVIDIA GPUs (12 GB memory or larger). 
+We have trained the moel on [NVIDIA V100](https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf) GPUs. For the CNN architecture, we have prepared `Res-Net` and `U-Net` (highly recommended) architectures. `Transformer` and `MLP` layers are available to encode time series data. The model can be set by the command line arguments. We used the following arguments for each task.
 
 | Task | Model | Arguments | 
 | --- | --- | --- |
 | Plume prediction | CNN/Transformer | ```--version 0 --UNet``` |
-| Plume prediction | MLP/Transformer | ```--version 3 --UNet``` |
+| Plume prediction | CNN/MLP | ```--version 1 --UNet``` |
 | Source detection | CNN/Transformer | ```--version 0 --UNet --model_name CityTransformerInverse``` |
-| Source detection | MLP/Transformer | ```--version 3 --UNet --model_name CityTransformerInverse``` |
+| Source detection | CNN/MLP | ```--version 1 --UNet --model_name CityTransformerInverse``` |
 
 For example, the arguments for `run.py` on SGI8600 is
 ```bash
 # Run Horovod example with 4 GPUs 
 mpirun -mca pml ob1 --mca btl ^openib -npernode 4 -np 4 \
        -x UCX_MEMTYPE_CACHE=n -x HOROVOD_MPI_THREADS_DISABLE=1 \
-       python run.py -data_dir <path_to_dataset_directory> --batch_size 16 --n_epochs 50 --version 0 \
+       python run.py -data_dir <path_to_dataset_directory>/dataset --batch_size 16 --n_epochs 50 --version 0 \
        --loss_type MAE --opt_type SGD --UNet
 ```
 
@@ -127,7 +130,7 @@ To check the model behavior, please check the training curve in `loss_*.png`. Fo
 For inference, one should add `--inference_mode` to the command line arguments. In the default, the model state stored in the last checkpoint file is loaded, but you can also specify the checkpoint file for example by `--checkpoint_idx 5`. The inference command for the run command above is
 ```bash
 # Infer with a single GPU
-python run.py -data_dir <path_to_dataset_directory> --batch_size 16 --n_epochs 50 --version 0 \
+python run.py -data_dir <path_to_dataset_directory>/dataset --batch_size 16 --n_epochs 50 --version 0 \
        --inference_mode --UNet --checkpoint_idx 19
 ```
 
@@ -151,10 +154,10 @@ If the code works appropriately, `inference` directory is created, which include
 To get figures, you need to run `post.py` as 
 ```bash
 # Postscript on a CPU
-python post.py -data_dir <path_to_dataset_directory> --version 0 --checkpoint_idx 19
+python post.py -data_dir <path_to_dataset_directory>/dataset --version 0 --checkpoint_idx 19
 ```
 
-You will find the figures in the following directory.
+You will find the figures and postscripted data files in the following directory. 
 
 ```
 ---/
@@ -163,8 +166,8 @@ You will find the figures in the following directory.
     |--loss/loss.png
     |
     |--contour/
-    |  |--log_test000000_epoch*.png
-    |  |--log_test000001_epoch*.png
+    |  |--concentration_test000000_epoch*.png
+    |  |--concentration_test000001_epoch*.png
     |  |--...
     |
     └──metrics/
@@ -176,19 +179,24 @@ You will find the figures in the following directory.
 ```
 
 # Citations
-## Deep Learning
+## Deep Learning (This work)
 ```bibtex
-@article{Asahi2022,
-    title = {{CityTransformer: A Transformer based model for contaminant dispersion prediction in
-a realistic urban area}},
-    year = {2022},
-    journal = {},
-    author = {Asahi, Yuuichi and Onodera, Naoyuki and Hasegawa, Yuta and Shimokawabe, Takashi and Shiba, Hayato and Idomura, Yasuhiro},
-    publisher = {},
-    doi = {},
-    issn = {},
-    keywords = {Deep learning; Graphics-processing-unit-based computing; Lattice Boltzmann
-method; Urban plume dispersion}
+@Article{Asahi2023,
+author={Asahi, Yuuichi
+and Onodera, Naoyuki
+and Hasegawa, Yuta
+and Shimokawabe, Takashi
+and Shiba, Hayato
+and Idomura, Yasuhiro},
+title={CityTransformer: A Transformer-Based Model for Contaminant Dispersion Prediction in a Realistic Urban Area},
+journal={Boundary-Layer Meteorology},
+year={2023},
+month={Jan},
+day={04},
+abstract={We develop a Transformer-based deep learning model to predict the plume concentrations in the urban area in statistically stationary flow conditions under a stationary and homogeneous forcing. Our model has two distinct input layers: Transformer layers for sequential data and convolutional layers in convolutional neural networks for image-like data. Our model can predict the plume concentration from realistically available data such as the time series monitoring data at a few observation stations, and the building shapes and the source location. It is shown that the model can give reasonably accurate prediction in less than a second. It is also shown that exactly the same model can be applied to predict the source location and emission rate, which also gives reasonable prediction accuracy.},
+issn={1573-1472},
+doi={10.1007/s10546-022-00777-8},
+url={https://doi.org/10.1007/s10546-022-00777-8}
 }
 ```
 
