@@ -8,8 +8,8 @@ This network can be used to predict the plume concentration and source location 
 
 | Task | Input data | Output data | Example | 
 | --- | --- | --- | --- |
-| Plume prediction | 1. Monitoring time series data <br> 2. Levelset of bulidings <br> 3. Distance function of sources | 1. Plume concentration <br> 2. Binary representation of plume | ![forward](doc/figs/forward.png) |
-| Source detection | 1. Monitoring time series data <br> 2. Levelset of bulidings | 1. Distance function of sources | ![inverse](doc/figs/inverse.png) |
+| Plume prediction | 1. Monitoring time series data <br> 2. Levelset of bulidings <br> 3. Distance function of sources | 1. Plume concentration <br> 2. Binary representation of plume | ![forward](docs/figs/forward.png) |
+| Source detection | 1. Monitoring time series data <br> 2. Levelset of bulidings | 1. Distance function of sources | ![inverse](docs/figs/inverse.png) |
 
 # Usage
 
