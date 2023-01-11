@@ -537,8 +537,10 @@ class _BaseTrainer(abc.ABC):
                 return False
         else:
             # Then inference mode with specified checkpoint file
-            if not (checkpoint_idx < len(checkpoint_files)):
-                raise ValueError(f'specified checkpoint idx {checkpoint_idx} is out of range')
+            checkpoint_file = self.sub_checkpoint_dir / f'checkpoint{checkpoint_idx:03}.nc'
+            if checkpoint_file not in checkpoint_files:
+                raise ValueError(f'specified checkpoint file checkpoint{checkpoint_idx:03}.nc is not found in {self.sub_checkpoint_dir}')
+            checkpoint_idx = checkpoint_files.index(checkpoint_file)
 
         checkpoint_files = sorted(checkpoint_files)
         self.checkpoint = checkpoint_files[checkpoint_idx]
