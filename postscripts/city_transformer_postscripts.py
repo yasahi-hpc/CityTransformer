@@ -232,16 +232,16 @@ class CityTransformerPostscripts(_BasePostscripts):
         Histograms are normalized by the total counts
         """
 
-        figsize = (20, 12)
+        figsize = (25, 15)
         plot_dict = {}
         # key: metric_name, value: xmin, xmax, ymin, ymax, label
         # xmin, xmax are also used to make histogram
-        plot_dict['FAC2'] = (0, 1, 0, 0.05, 'FAC_2')
-        plot_dict['FAC5'] = (0, 1, 0, 0.1, 'FAC_5')
-        plot_dict['FB']   = (-2, 2, 0, 0.05, 'FB')
-        plot_dict['NAD']  = (0, 0.15, 0, 0.15, 'NAD')
-        plot_dict['MG']   = (0, 2, 0, 0.1, 'MG')
-        plot_dict['VG']   = (1, 1.15, 0, 0.5, 'VG')
+        plot_dict['FAC2'] = (0, 1, 0, 0.05, r'${\rm FAC}_2$')
+        plot_dict['FAC5'] = (0, 1, 0, 0.1, r'${\rm FAC}_5$')
+        plot_dict['FB']   = (-2, 2, 0, 0.05, r'${\rm FB}$')
+        plot_dict['NAD']  = (0, 0.15, 0, 0.15, r'${\rm NAD}$')
+        plot_dict['MG']   = (0, 2, 0, 0.1, r'${\rm MG}$')
+        plot_dict['VG']   = (0, 5, 0, 0.1, r'$\ln \left({\rm VG}\right)$')
 
         metric_names = plot_dict.keys()
 
@@ -254,18 +254,20 @@ class CityTransformerPostscripts(_BasePostscripts):
                 xmin, xmax, ymin, ymax, label = plot_dict[metric_name]
                 bins = np.linspace(xmin, xmax, self.nb_bins)
                 metric = ds[metric_name].values
+                if metric_name == 'VG':
+                    metric = np.log( metric )
                 weights = np.ones_like(metric) / len(metric)
                 _hist, _bins, _patches = ax.hist(metric, bins=bins, alpha=0.5, weights=weights, label=self.arch_name)
                 average = np.mean( np.abs(metric) )
                 std = np.std( np.abs(metric) )
-                print(f'model: {self.arch_name}, metric_name: {metric_name}, average: {average}, std: {std}')
+                print(f'model: {self.arch_name}, mode: {mode}, metric_name: {metric_name}, average: {average}, std: {std}')
 
                 ax.set_xlim([xmin, xmax])
                 ax.set_ylim([ymin, ymax])
-                ax.set_title(metric_name, **self.title_font)
+                ax.set_title(label, **self.title_font)
                 ax.legend(loc='upper right', prop={'size': self.fontsize*0.6})
                 ax.grid(ls='dashed', lw=1)
 
-            figname = self.img_dir / 'metrics' / f'metric_{self.arch_name}.png'
+            figname = self.img_dir / 'metrics' / f'metric_{mode}_{self.arch_name}.png'
             plt.savefig(figname, bbox_inches='tight')
             plt.close('all')

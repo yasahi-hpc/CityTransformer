@@ -103,7 +103,7 @@ class _BaseTrainer(abc.ABC):
         if self.super_precision:
             raise ValueError('Please do not add --super_precision in your command line arguments. \
                               This functionality is suppressed which needs the multi-digits dataset. \
-                              We do not publish multi-digits dataset due to the limitiatio of storage.')
+                              We do not publish multi-digits dataset due to the limitiation of storage.')
 
     def initialize(self, *args, **kwargs):
         if self.inference_mode:
@@ -282,8 +282,8 @@ class _BaseTrainer(abc.ABC):
         attrs = {}
         if idx > 0:
             previous_checkpoint_file_name  = self.sub_checkpoint_dir / f'checkpoint{idx-1:03}.nc'
-            if not previous_checkpoint_file_name.is_file():
-                raise FileNotFoundError(f'{prev_result_filename} does not exist')
+            if not previous_checkpoint_file_name.exists():
+                raise FileNotFoundError(f'previous checkpoint file {previous_checkpoint_file_name} does not exist')
 
             ds = xr.open_dataset(previous_checkpoint_file_name, engine='netcdf4')
             attrs = ds.attrs.copy()
@@ -461,6 +461,9 @@ class _BaseTrainer(abc.ABC):
 
             last_run_number = ds.attrs['run_number']
             last_state_file = ds.attrs['last_state_file']
+            if not pathlib.Path(last_state_file).exists():
+                raise FileNotFoundError(f'previous state file {last_state_file} does not exist')
+
             print(f'Loading {last_state_file}\n')
             model.load_state_dict( torch.load(last_state_file) )
             self.epoch_start = int(ds.attrs['epoch_end']) + 1
@@ -529,7 +532,7 @@ class _BaseTrainer(abc.ABC):
             raise NotImplementedError(f'loss_type {loss_type} is not implemented')
 
     def __find_checkpoint(self, checkpoint_idx=-1):
-        checkpoint_files = list(self.sub_checkpoint_dir.glob('checkpoint*.nc'))
+        checkpoint_files = sorted(list(self.sub_checkpoint_dir.glob('checkpoint*.nc')))
 
         if checkpoint_idx==-1:
             if not checkpoint_files:
@@ -542,7 +545,6 @@ class _BaseTrainer(abc.ABC):
                 raise ValueError(f'specified checkpoint file checkpoint{checkpoint_idx:03}.nc is not found in {self.sub_checkpoint_dir}')
             checkpoint_idx = checkpoint_files.index(checkpoint_file)
 
-        checkpoint_files = sorted(checkpoint_files)
         self.checkpoint = checkpoint_files[checkpoint_idx]
         return True
 

@@ -65,17 +65,17 @@ class _BasePostscripts(abc.ABC):
                 sub_img_dir.mkdir(parents=True)
 
     def __get_checkpoint(self, checkpoint_idx=-1):
-        checkpoint_files = list(self.checkpoint_dir.glob('checkpoint*.nc'))
+        checkpoint_files = sorted(list(self.checkpoint_dir.glob('checkpoint*.nc')))
 
         if checkpoint_idx==-1:
             if not checkpoint_files:
                 raise ValueError(f'checkpoint not found')
         else:
             # Then inference mode with specified checkpoint file
-            if not (checkpoint_idx < len(checkpoint_files)):
-                raise ValueError(f'specified checkpoint idx {checkpoint_idx} is out of range')
-
-        checkpoint_files = sorted(checkpoint_files)
+            checkpoint_file = self.checkpoint_dir / f'checkpoint{checkpoint_idx:03}.nc'
+            if checkpoint_file not in checkpoint_files:
+                raise ValueError(f'specified checkpoint file checkpoint{checkpoint_idx:03}.nc is not found in {self.checkpoint_dir}')
+            checkpoint_idx = checkpoint_files.index(checkpoint_file)
 
         return checkpoint_files[checkpoint_idx]
 
