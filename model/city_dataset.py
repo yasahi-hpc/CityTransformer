@@ -1,44 +1,21 @@
 """
-Version 0: Resnet + Transformer (attention on time)
+Version 0: UNet + Transformer (attention on time), using the ground plume concentration only
 Input:
     imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, t, z) time series data of measurements
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
+    series: (b, t, s*c) time series data of measurement, c = (z, z, 1, 1)
 
-Version 1: Resnet + Transformer (attention on z)
+Output:
+    imgs: (b, 2, h, w) concentration + binary-map
+      
+Version 1: UNet + MLP, using the ground plume concentration only
 Input:
     imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, z) time averaged data of measurements
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
+    series: (b, 1, s*c) time series data of measurement, c = (z, z, 1, 1)
 
-Version 2: Resnet + Transformer (attention on time, at z = 0)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, t, 1) time series data of measurements
 Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/ sp):  (b, p, h, w) concentration (multiple-levels) + zero_map 
-
-Version 3: Resnet + MLP (on z)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, z) time averaged data of measurements
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/  sp): (b, p, h, w) concentration (multiple-levels) + zero_map
-
-Version 4: Resnet + MLP (on z==0)
-Input:
-    imgs: (b, c, h, w) sdfs of buildings and release points
-    series: (b, c, 1, 1) time averaged data of measurements at z = 0
-Output:
-    imgs (w/o sp): (b, 2, h, w) concentration + zero_map
-    imgs (w/  sp): (b, p, h, w) concentration (multiple-levels) + zero_map
+    imgs: (b, 2, h, w) concentration + binary-map
 """
+
 
 import xarray as xr
 import numpy as np
@@ -51,11 +28,12 @@ class CityDataset(torch.utils.data.Dataset):
                           'device',
                           'version',
                           'inference_mode',
-                          'n_digits',
+                          'nb_source_amps',
+                          'source_amps_max',
+                          'randomize_source_amps',
+                          'start_idx',
                           'nz',
                           'n_stations',
-                          'n_precision_enhancers',
-                          'super_precision',
                          }
 
         for kwarg in kwargs:
@@ -64,31 +42,33 @@ class CityDataset(torch.utils.data.Dataset):
 
         device = kwargs.get('device', 'cpu')
         version = kwargs.get('version', 0)
-        n_digits = kwargs.get('n_digits', 3)
         nz = kwargs.get('nz', 100)
-        n_precision_enhancers = kwargs.get('n_precision_enhancers', 2)
+
+        # If nb_source_amps > 1, then concentrations are augumented by random numbers
+        # This option is for inverse problem
+        self.source_amps_max = kwargs.get('source_amps_max', 100)
+        self.nb_source_amps = int(kwargs.get('nb_source_amps', 1))
+        self.start_idx = kwargs.get('start_idx', 0)
         inference_mode = kwargs.get('inference_mode', False)
-        super_precision = kwargs.get('super_precision', False)
+        self.randomize_source_amps = kwargs.get('randomize_source_amps', False)
+        self.n_stations = kwargs.get('n_stations', 14)
 
         self.files = sorted(list(pathlib.Path(path).glob('shot*.nc')))
-        self.datanum = len(self.files)
+        self.datanum = len(self.files) * self.nb_source_amps
         self.version = version
         self.inference_mode = inference_mode
-        self.n_digits = n_digits
         self.nz = nz
-        self.n_precision_enhancers = n_precision_enhancers
-        self.super_precision = super_precision
 
-        # Version 0 to 4 supported
-        assert self.version in [0,1,2,3,4]
+        # Version 0 and 1 are supported
+        assert self.version in [0,1]
 
         # read datashape
         ds = xr.open_dataset(self.files[0], engine='netcdf4')
 
-        # Interpolate along z direction
+        # Control the vertical level of measurements
         ds = ds.isel(z=slice(0, self.nz))
         self.station_positions = ds['station_position'].values
-        num_stations, Nt, Nz = ds['u'].shape
+        Nt, _, Nz = ds['u'].shape # (t, s, c)
         Ny, Nx = ds['levelset'].shape
 
         self.resolution_dict = {}
@@ -96,7 +76,18 @@ class CityDataset(torch.utils.data.Dataset):
         self.resolution_dict['Ny'] = Ny
         self.resolution_dict['Nz'] = Nz
         self.resolution_dict['Nt'] = Nt
-        self.resolution_dict['num_stations'] = num_stations * 4
+        self.resolution_dict['n_stations'] = self.n_stations
+
+        assert self.n_stations in [5, 10, 14]
+        # Control the number of stations for sensitivity analysis
+        if self.n_stations == 5:
+            self.station_list = [4, 9, 10, 12, 13]
+        elif self.n_stations == 10:
+            self.station_list = [0, 4, 5, 6, 7, 8, 9, 10, 12, 13]
+        else:
+            self.station_list = [i for i in range(14)]
+
+        self.station_positions = self.station_positions[self.station_list]
 
         # Normalization coefficients
         try:
@@ -104,105 +95,140 @@ class CityDataset(torch.utils.data.Dataset):
         except:
             raise FileNotFoundError('stats.nc storing normalization coefficients not found')
 
+        if self.randomize_source_amps:
+            try:
+                ds_rands = xr.open_dataset('random_numbers.nc', engine='netcdf4')
+            except:
+                raise FileNotFoundError('random_numbers.nc storing random numbers to control source amplitude not found')
+
+            self.random_numbers = ds_rands['random_factors'].values.flatten() # uniform numbers between 1 to 100
+            self.random_numbers = self.random_numbers[self.start_idx:]
+            # check the random numbers are sufficient
+            if len(self.random_numbers) < self.datanum:
+                small_enough_number = len(self.random_numbers) // len(self.files)
+                raise ValueError(f'nb_source_amps is too large. It should be smaller than {small_enough_number}')
+
         # Track min, max of output values
         to_tensor = lambda variable: torch.tensor(variable).view(1,-1,1,1).float().to(device)
         self.norm_dict = {}
-        for key, value in ds_stats.data_vars.items():
-            self.norm_dict[key] = to_tensor(value.values)
 
-        for key, value in ds_stats.attrs.items():
-            self.norm_dict[key] = to_tensor(value)
-
-        # Reform series data (4) -> (4, num_stations) -> (1, 4*num_stations, 1, 1)
-        self.norm_dict['series_max'] = to_tensor(np.tile(ds_stats['series_max'], (num_stations, 1)).T.flatten())
-        self.norm_dict['series_min'] = to_tensor(np.tile(ds_stats['series_min'], (num_stations, 1)).T.flatten())
-
-        #clip_digits = -1
-        #self.norm_dict['concentrations_max'] = to_tensor(ds_stats['log_concentration_multi_digits_max'].isel(num_digits=clip_digits).values)
-        #self.norm_dict['concentrations_min'] = to_tensor(ds_stats['log_concentration_multi_digits_min'].isel(num_digits=clip_digits).values)
+        # Input data shape (b, t, s, c) or (b, 1, s, c)
+        # The data shape should be (4) -> (c) = (z, z, 1, 1) -> (1, 1, s, c)
         self.norm_dict['concentrations_max'] = to_tensor(ds_stats['log_concentration_max'].values)
         self.norm_dict['concentrations_min'] = to_tensor(ds_stats['log_concentration_min'].values)
 
-        self.norm_dict['release_sdf_max'] = to_tensor(ds_stats['imgs_max'].values[0])
-        self.norm_dict['release_sdf_min'] = to_tensor(ds_stats['imgs_min'].values[0])
+        # Used for inverse problem
+        # Amplitude in the range of 1 to 100
+        distance_and_source_max = np.array( [ds_stats['imgs_max'].values[0], self.source_amps_max] )
+        distance_and_source_min = np.array( [ds_stats['imgs_min'].values[0], 1] )
+        self.norm_dict['distance_and_source_max'] = to_tensor( distance_and_source_max )
+        self.norm_dict['distance_and_source_min'] = to_tensor( distance_and_source_min )
+
+        imgs_max = ds_stats['imgs_max'].values
+        imgs_min = ds_stats['imgs_min'].values
+        if self.randomize_source_amps:
+            # (release, amps, sdf)
+            imgs_max = np.array([imgs_max[0], self.source_amps_max, imgs_max[1]])
+            imgs_min = np.array([imgs_min[0], 1, imgs_min[1]])
+
+        self.norm_dict['imgs_max'] = to_tensor( imgs_max )
+        self.norm_dict['imgs_min'] = to_tensor( imgs_min )
+
+        def to_series(values, multiplication=False):
+            u0, v0, c0, logc0 = values
+            u_norm, v_norm = np.ones(Nz) * u0, np.ones(Nz) * v0
+
+            if multiplication:
+                # Since mulitplied by random numbers [1, 100], max is also multiplied by 100
+                c0 = c0 * 100
+                logc0 = logc0 + 2
+
+            c_norm = np.array([c0, logc0])
+            variable = np.concatenate([u_norm, v_norm, c_norm], axis=0)
+
+            return torch.tensor(variable).view(1,1,1,-1).float().to(device)
+
+        self.norm_dict['series_max'] = to_series(ds_stats['series_max'].values, self.randomize_source_amps)
+        self.norm_dict['series_min'] = to_series(ds_stats['series_min'].values)
 
     def __len__(self):
         return self.datanum
 
     def __getitem__(self, idx):
+        """
+        Single dataset
+
+        imgs, out_imgs: (b, c, h, w)
+        series: (b, t, s, c)
+        """
+
+        source_factor = 1
+        # To randomly change the source amplitude
+        if self.randomize_source_amps:
+            source_factor = self.random_numbers[idx]
+            idx = idx % len(self.files)
+
         ds = xr.open_dataset(self.files[idx], engine='netcdf4')
         ds = ds.isel(z=slice(0, self.nz))
 
-        # Input imgs: sdf and release_point
+        # Scan with respect to the stations
+        station_list = self.station_list
+        ds = ds.isel(station=station_list)
+
+        # Input imgs: sdf and release_point (h, w)
         release_point = ds['release_point'].values
         sdf = ds['levelset'].values
-        imgs = torch.tensor(np.stack([release_point, sdf], axis=0)).float()
 
-        # Input series: u, v, concentration, log_concentration (Note: n_channels = num_stations x channels)
-        u = ds['u'].values
+        if self.randomize_source_amps:
+            # (release, amps, sdf)
+            source_amplitude = np.ones_like(sdf) * source_factor
+            imgs = torch.tensor(np.stack([release_point, source_amplitude, sdf], axis=0)).float()
+        else:
+            imgs = torch.tensor(np.stack([release_point, sdf], axis=0)).float()
+
+        # Input series: u, v, concentration, log_concentration
+        u = ds['u'].values # (nt, ns, nz)
         v = ds['v'].values
-        concentration = ds['concentration'].values
+
+        # On the ground only
+        concentration = ds['concentration'].values # (nt, ns)
         log_concentration = ds['log_concentration'].values
 
-        time_average = lambda var, keepdims: np.mean(var, axis=1, keepdims=keepdims)
+        if self.randomize_source_amps:
+            concentration *= source_factor
+            log_concentration += np.log10(source_factor)
+
+        Nt = 1
         if self.version == 0:
-            # time series data
-            # (stations, nt, nz)
-            pass
+            # Time series data
+            # (nt, ns, (nz+nz+1+1))
+            conentration = np.expand_dims(concentration, axis=2)
+            log_concentration = np.expand_dims(log_concentration, axis=2)
+            Nt = self.resolution_dict['Nt']
 
-        elif self.version in [1, 3]:
-            # targeting time averaged data
-            # (stations, 1, nz)
-            u = time_average(u, True)
+        elif self.version == 1:
+            # Time avareaged data
+            # (1, ns, (nz+nz+1+1))
+            time_average = lambda var, keepdims: np.mean(var, axis=0, keepdims=keepdims)
+            u = time_average(u, True) # (1, ns, nz)
             v = time_average(v, True)
-            concentration = time_average(concentration, True)
-            log_concentration = time_average(log_concentration, True)
+            conentration = np.expand_dims(time_average(concentration, True), axis=2) # (1, ns, 1)
+            log_concentration = np.expand_dims(time_average(log_concentration, True), axis=2)
 
-        elif self.version in [2]:
-            # time series data at z==0
-            # (stations, nt, 1)
-            u = np.expand_dims(u[:, :, 0], axis=2)
-            v = np.expand_dims(v[:, :, 0], axis=2)
-            concentration = np.expand_dims(concentration[:, :, 0], axis=2)
-            log_concentration = np.expand_dims(log_concentration[:, :, 0], axis=2)
-
-        elif self.version in [4]:
-            # targeting time averaged data at z==0
-            # (stations, 1, 1)
-            u = np.expand_dims(time_average(u, False)[:, 0], axis=(1, 2))
-            v = np.expand_dims(time_average(v, False)[:, 0], axis=(1, 2))
-            concentration = np.expand_dims(time_average(concentration, False)[:, 0], axis=(1, 2))
-            log_concentration = np.expand_dims(time_average(log_concentration, False)[:, 0], axis=(1, 2))
-
-        series = torch.tensor(np.concatenate([u, v, concentration, log_concentration], axis=0)).float()
+        series = np.concatenate([u, v, conentration, log_concentration], axis=2) # (nt, ns, (nz+nz+1+1))
+        series = torch.tensor(series).float()
 
         # Output imgs: concentration
         # Release points
         release_points = torch.tensor([ds.attrs['release_x'], ds.attrs['release_y']]).float()
-        flow_directions = torch.tensor([ds.attrs['v0'], ds.attrs['theta0']]).float()
+        flows_and_sources = torch.tensor([ds.attrs['v0'], ds.attrs['theta0'], source_factor]).float()
 
         concentration_binary_map = np.expand_dims(ds['concentration_binary_map'].values, axis=0)
         log_concentration_map = np.expand_dims(ds['log_concentration_map'].values, axis=0)
 
         out_imgs = torch.tensor(np.concatenate([log_concentration_map, concentration_binary_map], axis=0)).float()
 
-        #if self.super_precision:
-        #    # predict the summation recursively
-        #    out = []
-        #    for i in range(self.n_precision_enhancers+1):
-        #        concentration_multi_digits = ds['log_concentration_multi_digits'].isel(digits=self.n_digits+i).values
-        #        out.append(  np.expand_dims(concentration_multi_digits, axis=0) )
-
-        #    out.append( zeros_map )
-        #    out_imgs = torch.tensor(np.concatenate(out, axis=0)).float()
-
-        #else:
-        #    # This stores the summation from 0 to self.digits
-        #    concentration_multi_digits = ds['log_concentration_multi_digits'].isel(digits=self.n_digits).values
-        #    concentration_multi_digits = np.expand_dims(concentration_multi_digits, axis=0)
-        #    out_imgs = torch.tensor(np.concatenate([concentration_multi_digits, zeros_map], axis=0)).float()
-
         if self.inference_mode:
-            return idx, imgs, out_imgs, series, release_points, flow_directions
+            return idx, imgs, out_imgs, series, release_points, flows_and_sources
         else:
             return imgs, out_imgs, series, release_points

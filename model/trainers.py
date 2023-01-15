@@ -1,5 +1,5 @@
-from ._city_transformer_trainer import CityTransformerTrainer
-from ._city_transformer_inverse_trainer import CityTransformerInverseTrainer
+from .city_transformer_trainer import CityTransformerTrainer
+from .city_transformer_inverse_trainer import CityTransformerInverseTrainer
 
 def get_trainer(name):
     TRAINERS = {

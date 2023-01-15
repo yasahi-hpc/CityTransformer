@@ -1,5 +1,5 @@
-from ._city_transformer_postscripts import CityTransformerPostscripts
-from ._city_transformer_inverse_postscripts import CityTransformerInversePostscripts
+from .city_transformer_postscripts import CityTransformerPostscripts
+from .city_transformer_inverse_postscripts import CityTransformerInversePostscripts
 
 def get_postscripts(name):
     POST_SCRIPTS = {

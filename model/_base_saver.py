@@ -1,11 +1,13 @@
+import abc
 import pathlib
 
-class _BaseSaver:
+class _BaseSaver(abc.ABC):
     """
     Base class to save figures or data
     """
 
     def __init__(self, *args, **kwargs):
+        super().__init__()
         allowed_kwargs = {
                           'out_dir',
                           'modes',
@@ -19,8 +21,8 @@ class _BaseSaver:
                           'n_precision_enhancers',
                           'norm_dict',
                           'station_positions',
-                          'num_stations',
-                          'num_vars',
+                          'n_stations',
+                          'nz',
                          }
 
         for kwarg in kwargs:
@@ -37,5 +39,6 @@ class _BaseSaver:
             if not sub_out_dir.exists():
                 sub_out_dir.mkdir(parents=True)
 
+    @abc.abstractmethod
     def save(self, *args, **kwargs):
-        self._save(*args, **kwargs)
+        raise NotImplementedError()

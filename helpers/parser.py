@@ -73,6 +73,26 @@ def parse():
                         help='Number of digits to predict', \
                         metavar=None
                        )
+    parser.add_argument('--n_stations', \
+                        action='store', \
+                        nargs='?', \
+                        const=None, \
+                        default=14, \
+                        type=int, \
+                        choices=None, \
+                        help='Number of monitoring stations choose from (5, 10, 14)', \
+                        metavar=None
+                       )
+    parser.add_argument('--nz_scan', \
+                        action='store', \
+                        nargs='?', \
+                        const=None, \
+                        default=100, \
+                        type=int, \
+                        choices=None, \
+                        help='Number of vertical points at monitoring stations (25, 50, 100)', \
+                        metavar=None
+                       )
     parser.add_argument('--n_precision_enhancers', \
                         action='store', \
                         nargs='?', \
